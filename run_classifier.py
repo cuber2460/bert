@@ -13,9 +13,8 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
-## Required parameters
 flags.DEFINE_string(
-    "data_dir", None,
+    "data_dir", "gs://zpp-bucket-1920/treeSort/linearSort/data",
     "The input data dir. Should contain the .tfrecord files.")
 
 flags.DEFINE_string(
@@ -24,11 +23,16 @@ flags.DEFINE_string(
     "This specifies the model architecture.")
 
 flags.DEFINE_string(
-    "output_dir", None,
+    "output_dir", "gs://zpp-bucket-1920/treeSort/linearSort/model",
     "The output directory where the model checkpoints will be written.")
 
-## Other parameters
+flags.DEFINE_integer(
+    "train_examples", None,
+    "Number of train examples.")
 
+flags.DEFINE_integer(
+    "eval_examples", None,
+    "Number of eval examples.")
 
 flags.DEFINE_string(
     "init_checkpoint", None,
@@ -39,6 +43,8 @@ flags.DEFINE_integer(
     "The maximum total input sequence length. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
+
+flags.DEFINE_bool("reset", False, "Whether to clear model directory.")
 
 flags.DEFINE_bool("do_train", False, "Whether to run training.")
 
@@ -64,16 +70,16 @@ flags.DEFINE_float(
     "Proportion of training to perform linear learning rate warmup for. "
     "E.g., 0.1 = 10% of training.")
 
-flags.DEFINE_integer("save_checkpoints_steps", 1000,
+flags.DEFINE_integer("save_checkpoints_steps", 50000,
                      "How often to save the model checkpoint.")
 
-flags.DEFINE_integer("iterations_per_loop", 1000,
+flags.DEFINE_integer("iterations_per_loop", 50000,
                      "How many steps to make in each estimator call.")
 
-flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
+flags.DEFINE_bool("use_tpu", True, "Whether to use TPU or GPU/CPU.")
 
 tf.flags.DEFINE_string(
-    "tpu_name", None,
+    "tpu_name", "tree-sort",
     "The Cloud TPU to use for training. This should be either the name "
     "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
     "url.")
@@ -85,7 +91,7 @@ tf.flags.DEFINE_string(
     "metadata.")
 
 tf.flags.DEFINE_string(
-    "gcp_project", None,
+    "gcp_project", "zpp-mim-1920",
     "[Optional] Project name for the Cloud TPU-enabled project. If not "
     "specified, we will attempt to automatically detect the GCE project from "
     "metadata.")
@@ -141,7 +147,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
     return d
 
   return input_fn
-
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                  labels, num_labels, use_one_hot_embeddings):
@@ -282,7 +287,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.do_redict:
+  if FLAGS.do_predict:
     raise NotImplementedError() 
 
   if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
@@ -298,6 +303,8 @@ def main(_):
         (FLAGS.max_seq_length, bert_config.max_position_embeddings))
 
   tf.gfile.MakeDirs(FLAGS.output_dir)
+  if FLAGS.reset:
+    tf.gfile.DeleteRecursively(FLAGS.output_dir)
 
   tpu_cluster_resolver = None
   if FLAGS.use_tpu and FLAGS.tpu_name:
@@ -318,7 +325,7 @@ def main(_):
   num_train_steps = None
   num_warmup_steps = None
   if FLAGS.do_train:
-    num_train_steps = train_examples / FLAGS.train_batch_size * FLAGS.num_train_epochs)
+    num_train_steps = int(train_examples / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
   model_fn = model_fn_builder(
@@ -344,7 +351,7 @@ def main(_):
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.data_dir, "train.tfrecord")
     tf.logging.info("***** Running training *****")
-    tf.logging.info("  Num examples = %d", len(train_examples))
+    tf.logging.info("  Num examples = %d", train_examples)
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     tf.logging.info("  Num steps = %d", num_train_steps)
     train_input_fn = file_based_input_fn_builder(
@@ -357,8 +364,10 @@ def main(_):
   if FLAGS.do_eval:
     eval_file = os.path.join(FLAGS.data_dir, "eval.tfrecord")
 
+    eval_examples = FLAGS.eval_examples
+
     tf.logging.info("***** Running evaluation *****")
-    tf.logging.info("  Num examples = %d ", len(eval_examples))
+    tf.logging.info("  Num examples = %d ", eval_examples)
     tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
     # This tells the estimator to run through the entire set.
@@ -366,8 +375,8 @@ def main(_):
     # However, if running eval on the TPU, you will need to specify the
     # number of steps.
     if FLAGS.use_tpu:
-      assert len(eval_examples) % FLAGS.eval_batch_size == 0
-      eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
+      assert eval_examples % FLAGS.eval_batch_size == 0
+      eval_steps = int(eval_examples // FLAGS.eval_batch_size)
 
     eval_drop_remainder = True if FLAGS.use_tpu else False
     eval_input_fn = file_based_input_fn_builder(
@@ -387,8 +396,5 @@ def main(_):
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("data_dir")
   flags.mark_flag_as_required("bert_config_file")
-  flags.mark_flag_as_required("output_dir")
-  flags.mark_flag_as_required("train_examples")
   tf.app.run()
