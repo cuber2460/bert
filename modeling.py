@@ -132,6 +132,7 @@ class BertModel(object):
                config,
                is_training,
                input_ids,
+               post_order,
                input_mask=None,
                token_type_ids=None,
                use_one_hot_embeddings=False,
@@ -143,6 +144,7 @@ class BertModel(object):
       is_training: bool. true for training model, false for eval model. Controls
         whether dropout will be applied.
       input_ids: int32 Tensor of shape [batch_size, seq_length].
+      post_order: Tensor of shape [batch_size, seq_length] - post order, 0-indexed
       input_mask: (optional) int32 Tensor of shape [batch_size, seq_length].
       token_type_ids: (optional) int32 Tensor of shape [batch_size, seq_length].
       use_one_hot_embeddings: (optional) bool. Whether to use one-hot word
@@ -183,6 +185,7 @@ class BertModel(object):
         # normalize and perform dropout.
         self.embedding_output = embedding_postprocessor(
             input_tensor=self.embedding_output,
+            order_tensor=post_order,
             use_token_type=True,
             token_type_ids=token_type_ids,
             token_type_vocab_size=config.type_vocab_size,
@@ -426,6 +429,7 @@ def embedding_lookup(input_ids,
 
 
 def embedding_postprocessor(input_tensor,
+                            order_tensor,
                             use_token_type=False,
                             token_type_ids=None,
                             token_type_vocab_size=16,
@@ -493,17 +497,18 @@ def embedding_postprocessor(input_tensor,
           name=position_embedding_name,
           shape=[max_position_embeddings, width],
           initializer=create_initializer(initializer_range))
-      # Since the position embedding table is a learned variable, we create it
-      # using a (long) sequence length `max_position_embeddings`. The actual
-      # sequence length might be shorter than this, for faster training of
-      # tasks that do not have long sequences.
-      #
-      # So `full_position_embeddings` is effectively an embedding table
-      # for position [0, 1, 2, ..., max_position_embeddings-1], and the current
-      # sequence has positions [0, 1, 2, ... seq_length-1], so we can just
-      # perform a slice.
+      
       position_embeddings = tf.slice(full_position_embeddings, [0, 0],
                                      [seq_length, -1])
+
+      order_embeddings = tf.get_variable(
+          name="order embeddings",
+          shape=[seq_length, width],
+          initializer=create_initializer(initializer_range))
+
+      one_hot_ids = tf.one_hot(order_tensor, depth=seq_length)
+      position_embeddings += tf.matmul(one_hot_ids, order_embeddings)
+
       num_dims = len(output.shape.as_list())
 
       # Only the last two dimensions are relevant (`seq_length` and `width`), so

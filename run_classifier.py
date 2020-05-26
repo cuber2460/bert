@@ -14,7 +14,7 @@ flags = tf.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    "data_dir", "gs://zpp-bucket-1920/treeSort/linearSort/data",
+    "data_dir", "gs://zpp-bucket-1920/treeSort/data",
     "The input data dir. Should contain the .tfrecord files.")
 
 flags.DEFINE_string(
@@ -23,7 +23,7 @@ flags.DEFINE_string(
     "This specifies the model architecture.")
 
 flags.DEFINE_string(
-    "output_dir", "gs://zpp-bucket-1920/treeSort/linearSort/model",
+    "output_dir", "gs://zpp-bucket-1920/treeSort/model",
     "The output directory where the model checkpoints will be written.")
 
 flags.DEFINE_integer(
@@ -107,6 +107,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
   name_to_features = {
       "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
+      "post_order": tf.FixedLenFeature([seq_length], tf.int64),
       "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
       "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
       "label_ids": tf.FixedLenFeature([], tf.int64),
@@ -148,13 +149,14 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
   return input_fn
 
-def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
+def create_model(bert_config, is_training, input_ids, post_order, input_mask, segment_ids,
                  labels, num_labels, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
       is_training=is_training,
       input_ids=input_ids,
+      post_order=post_order,
       input_mask=input_mask,
       token_type_ids=segment_ids,
       use_one_hot_embeddings=use_one_hot_embeddings)
@@ -206,6 +208,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     input_ids = features["input_ids"]
+    post_order = features["post_order"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
     label_ids = features["label_ids"]
@@ -218,8 +221,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
-        num_labels, use_one_hot_embeddings)
+        bert_config, is_training, input_ids, post_order, input_mask, segment_ids, 
+        label_ids, num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
