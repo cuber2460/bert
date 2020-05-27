@@ -501,14 +501,6 @@ def embedding_postprocessor(input_tensor,
       position_embeddings = tf.slice(full_position_embeddings, [0, 0],
                                      [seq_length, -1])
 
-      order_embeddings = tf.get_variable(
-          name="order embeddings",
-          shape=[seq_length, width],
-          initializer=create_initializer(initializer_range))
-
-      one_hot_ids = tf.one_hot(order_tensor, depth=seq_length)
-      position_embeddings += tf.matmul(one_hot_ids, order_embeddings)
-
       num_dims = len(output.shape.as_list())
 
       # Only the last two dimensions are relevant (`seq_length` and `width`), so
@@ -521,6 +513,14 @@ def embedding_postprocessor(input_tensor,
       position_embeddings = tf.reshape(position_embeddings,
                                        position_broadcast_shape)
       output += position_embeddings
+      order_embeddings = tf.get_variable(
+          name="order_embeddings",
+          shape=[seq_length, width],
+          initializer=create_initializer(initializer_range))
+
+      one_hot_ids = tf.one_hot(tf.reshape(order_tensor, [-1]), depth=seq_length)
+      order_embeddings = tf.matmul(one_hot_ids, order_embeddings)
+      output += tf.reshape(order_embeddings, [batch_size, seq_length, width])
 
   output = layer_norm_and_dropout(output, dropout_prob)
   return output

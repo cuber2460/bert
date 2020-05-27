@@ -23,7 +23,7 @@ flags.DEFINE_string(
     "This specifies the model architecture.")
 
 flags.DEFINE_string(
-    "output_dir", "gs://zpp-bucket-1920/treeSort/model",
+    "output_dir", None,
     "The output directory where the model checkpoints will be written.")
 
 flags.DEFINE_integer(
@@ -79,7 +79,7 @@ flags.DEFINE_integer("iterations_per_loop", 50000,
 flags.DEFINE_bool("use_tpu", True, "Whether to use TPU or GPU/CPU.")
 
 tf.flags.DEFINE_string(
-    "tpu_name", "tree-sort",
+    "tpu_name", None,
     "The Cloud TPU to use for training. This should be either the name "
     "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
     "url.")
@@ -400,4 +400,6 @@ def main(_):
 
 if __name__ == "__main__":
   flags.mark_flag_as_required("bert_config_file")
+  flags.mark_flag_as_required("output_dir")
+  flags.mark_flag_as_required("tpu_name")  
   tf.app.run()
