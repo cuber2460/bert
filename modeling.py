@@ -42,7 +42,8 @@ class BertConfig(object):
                attention_probs_dropout_prob=0.1,
                max_position_embeddings=512,
                type_vocab_size=16,
-               initializer_range=0.02):
+               initializer_range=0.02,
+               use_tree_embeddings=True):
     """Constructs BertConfig.
 
     Args:
@@ -78,6 +79,7 @@ class BertConfig(object):
     self.max_position_embeddings = max_position_embeddings
     self.type_vocab_size = type_vocab_size
     self.initializer_range = initializer_range
+    self.use_tree_embeddings = use_tree_embeddings
 
   @classmethod
   def from_dict(cls, json_object):
@@ -132,6 +134,7 @@ class BertModel(object):
                config,
                is_training,
                input_ids,
+               pre_order,
                post_order,
                input_mask=None,
                token_type_ids=None,
@@ -144,6 +147,7 @@ class BertModel(object):
       is_training: bool. true for training model, false for eval model. Controls
         whether dropout will be applied.
       input_ids: int32 Tensor of shape [batch_size, seq_length].
+      pre_order: Tensor of shape [batch_size, seq_length] - pre order, 0-indexed
       post_order: Tensor of shape [batch_size, seq_length] - post order, 0-indexed
       input_mask: (optional) int32 Tensor of shape [batch_size, seq_length].
       token_type_ids: (optional) int32 Tensor of shape [batch_size, seq_length].
@@ -185,13 +189,15 @@ class BertModel(object):
         # normalize and perform dropout.
         self.embedding_output = embedding_postprocessor(
             input_tensor=self.embedding_output,
-            order_tensor=post_order,
+            pre_order_tensor=pre_order,
+            post_order_tensor=post_order,
             use_token_type=True,
             token_type_ids=token_type_ids,
             token_type_vocab_size=config.type_vocab_size,
             token_type_embedding_name="token_type_embeddings",
             use_position_embeddings=True,
             position_embedding_name="position_embeddings",
+            use_tree_embeddings=config.use_tree_embeddings,
             initializer_range=config.initializer_range,
             max_position_embeddings=config.max_position_embeddings,
             dropout_prob=config.hidden_dropout_prob)
@@ -429,13 +435,15 @@ def embedding_lookup(input_ids,
 
 
 def embedding_postprocessor(input_tensor,
-                            order_tensor,
+                            pre_order_tensor,
+                            post_order_tensor,
                             use_token_type=False,
                             token_type_ids=None,
                             token_type_vocab_size=16,
                             token_type_embedding_name="token_type_embeddings",
                             use_position_embeddings=True,
                             position_embedding_name="position_embeddings",
+                            use_tree_embeddings=True,
                             initializer_range=0.02,
                             max_position_embeddings=512,
                             dropout_prob=0.1):
@@ -513,14 +521,27 @@ def embedding_postprocessor(input_tensor,
       position_embeddings = tf.reshape(position_embeddings,
                                        position_broadcast_shape)
       output += position_embeddings
-      order_embeddings = tf.get_variable(
-          name="order_embeddings",
+      
+  if use_tree_embeddings:
+    assert_op = tf.assert_less_equal(seq_length, max_position_embeddings)
+    with tf.control_dependencies([assert_op]):
+      pre_order_embeddings = tf.get_variable(
+          name="pre_order_embeddings",
           shape=[seq_length, width],
           initializer=create_initializer(initializer_range))
 
-      one_hot_ids = tf.one_hot(tf.reshape(order_tensor, [-1]), depth=seq_length)
-      order_embeddings = tf.matmul(one_hot_ids, order_embeddings)
-      output += tf.reshape(order_embeddings, [batch_size, seq_length, width])
+      post_order_embeddings = tf.get_variable(
+          name="post_order_embeddings",
+          shape=[seq_length, width],
+          initializer=create_initializer(initializer_range))
+
+      one_hot_ids = tf.one_hot(tf.reshape(pre_order_tensor, [-1]), depth=seq_length)
+      pre_order_emb = tf.matmul(one_hot_ids, pre_order_embeddings)
+
+      one_hot_ids = tf.one_hot(tf.reshape(post_order_tensor, [-1]), depth=seq_length)
+      post_order_emb = tf.matmul(one_hot_ids, post_order_embeddings)
+
+      output += tf.reshape(pre_order_emb + post_order_emb, [batch_size, seq_length, width])
 
   output = layer_norm_and_dropout(output, dropout_prob)
   return output

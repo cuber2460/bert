@@ -39,7 +39,7 @@ flags.DEFINE_string(
     "Initial checkpoint.")
 
 flags.DEFINE_integer(
-    "max_seq_length", 128,
+    "max_seq_length", 48,
     "The maximum total input sequence length. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
@@ -54,26 +54,26 @@ flags.DEFINE_bool(
     "do_predict", False,
     "Whether to run the model in inference mode on the test set.")
 
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
+flags.DEFINE_integer("train_batch_size", 16384, "Total batch size for training.")
 
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
+flags.DEFINE_integer("eval_batch_size", 16384, "Total batch size for eval.")
 
 flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
 
-flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
+flags.DEFINE_float("learning_rate", 1.0, "The initial learning rate for Adam.")
 
 flags.DEFINE_float("num_train_epochs", 3.0,
                    "Total number of training epochs to perform.")
 
 flags.DEFINE_float(
-    "warmup_proportion", 0.1,
+    "warmup_proportion", 0.0,
     "Proportion of training to perform linear learning rate warmup for. "
     "E.g., 0.1 = 10% of training.")
 
-flags.DEFINE_integer("save_checkpoints_steps", 50000,
+flags.DEFINE_integer("save_checkpoints_steps", 500,
                      "How often to save the model checkpoint.")
 
-flags.DEFINE_integer("iterations_per_loop", 50000,
+flags.DEFINE_integer("iterations_per_loop", 100,
                      "How many steps to make in each estimator call.")
 
 flags.DEFINE_bool("use_tpu", True, "Whether to use TPU or GPU/CPU.")
@@ -107,6 +107,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
   name_to_features = {
       "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
+      "pre_order": tf.FixedLenFeature([seq_length], tf.int64),
       "post_order": tf.FixedLenFeature([seq_length], tf.int64),
       "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
       "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
@@ -137,7 +138,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
     d = tf.data.TFRecordDataset(input_file)
     if is_training:
       d = d.repeat()
-      d = d.shuffle(buffer_size=100)
+      d = d.shuffle(buffer_size=100000)
 
     d = d.apply(
         tf.contrib.data.map_and_batch(
@@ -149,13 +150,14 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
   return input_fn
 
-def create_model(bert_config, is_training, input_ids, post_order, input_mask, segment_ids,
+def create_model(bert_config, is_training, input_ids, pre_order, post_order, input_mask, segment_ids,
                  labels, num_labels, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
       is_training=is_training,
       input_ids=input_ids,
+      pre_order=pre_order,
       post_order=post_order,
       input_mask=input_mask,
       token_type_ids=segment_ids,
@@ -208,6 +210,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     input_ids = features["input_ids"]
+    pre_order = features["pre_order"]
     post_order = features["post_order"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
@@ -221,7 +224,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, post_order, input_mask, segment_ids, 
+        bert_config, is_training, input_ids, pre_order, post_order, input_mask, segment_ids, 
         label_ids, num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
@@ -240,6 +243,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       else:
         tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
+    total_params = 0
     tf.logging.info("**** Trainable Variables ****")
     for var in tvars:
       init_string = ""
@@ -247,6 +251,13 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         init_string = ", *INIT_FROM_CKPT*"
       tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                       init_string)
+
+      params = 1
+      for dim in var.get_shape():
+          params *= dim.value
+      total_params += params
+
+    tf.logging.info("Total parameters = %d", total_params)
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
@@ -362,6 +373,7 @@ def main(_):
         seq_length=FLAGS.max_seq_length,
         is_training=True,
         drop_remainder=True)
+    
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
   if FLAGS.do_eval:
